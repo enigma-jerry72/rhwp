@@ -726,8 +726,23 @@ pub fn svgs_to_pdf_with_options(
         let mut conversion = svg2pdf::ConversionOptions::default();
         conversion.embed_text = export_options.embed_text;
 
-        let (chunk, svg_ref) = svg2pdf::to_chunk(&tree, conversion)
-            .map_err(|e| format!("SVG→chunk 변환 실패: {:?}", e))?;
+        let (chunk, svg_ref) = match svg2pdf::to_chunk(&tree, conversion) {
+            Ok(pair) => pair,
+            Err(err) if export_options.embed_text => {
+                // 폰트 서브셋 실패(SubsetError 등) 페이지 폴백: 글리프를 path 로
+                // 변환(embed_text=false, Task #2264 기전)해 재시도한다. PUA/희귀
+                // 글리프가 CFF 폴백 폰트로 흘러 subsetter 가 실패하는 문서
+                // (pua-test.hwp 등 복수 샘플)에서 문서 전체 export 실패를 막는다.
+                // 대가: 해당 페이지만 텍스트 추출 불가 — 실패보다 낫다.
+                eprintln!("경고: 페이지 폰트 서브셋 실패({err:?}) — 글리프 path 변환으로 재시도");
+                let mut fallback = svg2pdf::ConversionOptions::default();
+                fallback.embed_text = false;
+                svg2pdf::to_chunk(&tree, fallback).map_err(|fallback_err| {
+                    format!("SVG→chunk 변환 실패(폴백 포함): {err:?} / {fallback_err:?}")
+                })?
+            }
+            Err(err) => return Err(format!("SVG→chunk 변환 실패: {err:?}")),
+        };
 
         let dpi_ratio = 72.0 / 96.0; // 96 DPI → 72 pt
         let w = tree.size().width() * dpi_ratio;
