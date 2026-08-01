@@ -1100,10 +1100,32 @@ pub fn base_family_without_weight_suffix(font_family: &str) -> Option<String> {
 
 /// [#3314] 렌더용 폴백 체인 문자열: `요청 face → (base family) → generic 체인`.
 pub fn render_font_family_chain(font_family: &str) -> String {
+    render_font_family_chain_weighted(font_family, false)
+}
+
+/// 렌더용 폴백 체인 — 시각적 bold run 전용 변형.
+///
+/// Task #1224 는 한컴 돋움 획 두께 정합을 위해 sans 폴백에
+/// 'Noto Sans KR ExtraLight' 를 삽입했다 (regular 본문 대상). bold run 이
+/// 같은 체인을 쓰면 시스템 고딕 부재 환경에서 ExtraLight(200) 페이스가
+/// 매칭되고, 브라우저는 faux-bold 로 가려지지만 svg2pdf 는 합성하지 않아
+/// PDF 굵기가 소실된다. visually_bold 일 때만
+/// ExtraLight 항목을 체인에서 제거한다 — regular 는 #1224 계약 그대로.
+pub fn render_font_family_chain_weighted(font_family: &str, visually_bold: bool) -> String {
     let fb = generic_fallback(font_family);
-    match base_family_without_weight_suffix(font_family) {
+    let chain = match base_family_without_weight_suffix(font_family) {
         Some(base) => format!("{},'{}',{}", font_family, base, fb),
         None => format!("{},{}", font_family, fb),
+    };
+    if visually_bold {
+        // 위치(처음/중간/끝) 무관하게 항목 단위로 제거한다.
+        chain
+            .split(',')
+            .filter(|entry| !entry.contains("Noto Sans KR ExtraLight"))
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        chain
     }
 }
 
